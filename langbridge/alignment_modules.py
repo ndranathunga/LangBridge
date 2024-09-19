@@ -18,6 +18,40 @@ class Linear(nn.Module):
         x = self.linear(x)
         return x
 
+class LinearWithRR(nn.Module):
+    """
+    Linear layer with relative representation.
+    """
+
+    def __init__(self, dim, out_dim, anchors: dict[str, torch.Tensor]):
+        super().__init__()
+
+        assert 'high_res' in anchors and 'low_res' in anchors, "Anchors must contain 'high_res' and 'low_res' keys."
+        assert anchors['high_res'].ndimension() == 2, "high_res anchor must be a 2D tensor."
+        assert anchors['low_res'].ndimension() == 2, "low_res anchor must be a 2D tensor."
+        assert anchors['high_res'].shape[1] == dim, (
+            f"Expected high_res anchor second dimension to be {dim}, but got {anchors['high_res'].shape[1]}"
+        )
+        assert anchors['low_res'].shape[1] == dim, (
+            f"Expected low_res anchor second dimension to be {dim}, but got {anchors['low_res'].shape[1]}"
+        )
+
+        self.anchors_high_res = anchors['high_res']
+        self.anchors_low_res = anchors['low_res']
+        self.linear = nn.Linear(dim, out_dim, bias=True)
+
+    def forward(self, x):
+        # in training mode uses the high resolution anchors, in eval mode uses the low resolution anchors
+        if self.training:
+            anchors = self.anchors_high_res
+        else:
+            anchors = self.anchors_low_res
+
+        x = x @ anchors.t()
+        x = self.linear(x)
+
+        return x
+
 
 class LinearWithAddedEos(nn.Module):
     """

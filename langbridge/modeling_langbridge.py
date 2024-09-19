@@ -11,6 +11,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+import pandas as pd
+from tqdm import tqdm
+
 from transformers import PreTrainedModel, AutoModel, AutoConfig, PreTrainedTokenizer, MT5EncoderModel, UMT5EncoderModel
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
@@ -18,7 +21,7 @@ from transformers.modeling_outputs import (
 )
 
 from .configuration_langbridge import LangBridgeConfig
-from .alignment_modules import LinearWithAddedEos, PerceiverResampler, FFNWithAddedEos
+from .alignment_modules import LinearWithAddedEos, PerceiverResampler, FFNWithAddedEos, LinearWithRR
 
 
 @contextlib.contextmanager
@@ -32,6 +35,30 @@ def suppress_model_loading_warnings(suppress: bool = True):
     else:
         yield
 
+def get_anchor_vectors(anchor_ids: dict, enc_model: PreTrainedModel) -> Dict[str, torch.Tensor]:
+    """Get the anchor vectors from the encoder model."""
+
+    assert 'high_res' in anchor_ids and 'low_res' in anchor_ids, 'anchor_ids must contain high_res and low_res keys'
+    assert len(anchor_ids['high_res']) == len(anchor_ids['low_res']), 'high_res and low_res must have the same length'
+
+    anchor_vectors = {}
+    for res, anchors in tqdm(anchor_ids.items(), desc='Getting anchor vectors'):
+        anchor_vectors[res] = []
+        for anchor in tqdm(anchors, desc=f'Getting anchor vectors for {res}'):
+            anchor = anchor.unsqueeze(0).to(enc_model.device) # Add batch dimension [1, seq_length]
+
+            with torch.no_grad():  
+                model_output = enc_model(anchor)
+                last_hidden_state = model_output.last_hidden_state  # Shape: [1, seq_length, hidden_dim]
+
+            # Compute the mean of the last hidden state across the sequence (dim=1)
+            mean_hidden_state = last_hidden_state.mean(dim=1)  # Shape: [1, hidden_dim]
+            anchor_vectors[res].append(mean_hidden_state)
+
+        # Stack to get a single tensor for each resolution
+        anchor_vectors[res] = torch.cat(anchor_vectors[res], dim=0)  # Shape: [num_sentences, hidden_dim]
+
+    return anchor_vectors
 
 class LBBaseModel(ABC, PreTrainedModel):
 
@@ -73,6 +100,11 @@ class LBBaseModel(ABC, PreTrainedModel):
         elif config.alignments == 'latent':
             self.alignment = PerceiverResampler(
                 dim=config.dim_enc, out_dim=config.dim_lm, num_latents=config.num_latents)
+        elif config.alignments == 'rr':
+            assert config.anchor_ids is not None, 'anchor_ids must be provided for rr alignment'
+            anchors = get_anchor_vectors(config.anchor_ids, self.enc)
+            self.alignment = LinearWithRR(
+                dim=config.dim_enc, out_dim=config.dim_lm, anchors=anchors)
         else:
             raise ValueError(
                 f'unknown alignment type {config.alignments}')

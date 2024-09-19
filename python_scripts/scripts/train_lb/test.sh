@@ -2,6 +2,7 @@
 export OMP_NUM_THREADS=8
 # export TRANSFORMERS_CACHE=/mnt/sda/dongkeun/huggingface
 # export HF_DATASETS_CACHE=/mnt/sda/dongkeun/huggingface_datasets
+export TORCH_CUDA_ARCH_LIST="7.5"
 
 export CUDA_VISIBLE_DEVICES=0
 NUM_GPU=1
@@ -9,18 +10,18 @@ NUM_GPU=1
 ARGS="
 --n_gpu $NUM_GPU
 --strategy deepspeed_stage_2
---output_dir checkpoints/orca2-lb-9b
+--output_dir checkpoints/test
 --run_name orca2-lb-9b
 --seed 42
---train_set_path DKYoon/slimorca-200k-english
+--train_set_path DKYoon/metamath-200k
 --output_exists True
---enc_name_or_path DKYoon/mt5-xl-lm-adapt
---lm_name_or_path microsoft/Orca-2-7b
---alignments rr # previously linear
---enc_hidden_size 2048
---lm_hidden_size 4096
---max_length 128
---max_length_enc 1024
+--enc_name_or_path DKYoon/mt5-small-lm-adapt
+--lm_name_or_path facebook/opt-125m
+--alignments linear 
+--enc_hidden_size 512
+--lm_hidden_size 768
+--max_length 256
+--max_length_enc 128
 --freeze_language_model True
 --freeze_encoder True
 --learning_rate_alignment 6e-4

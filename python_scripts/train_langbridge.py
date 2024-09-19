@@ -4,6 +4,8 @@ import logging
 import string
 import random
 
+from typing import List
+import pandas as pd
 
 import torch
 from torch.utils.data import DataLoader
@@ -98,6 +100,9 @@ class AlignLBModule(LightningModule):
         no_output_data = [d['input']
                           for d in batch if not d['output']]  # unlabeled data
 
+        if len(no_output_data) == 0:
+            raise ValueError("Received an empty batch. Check the data or data loader configuration.")
+
         suffix = []
         enc_tokens = self.enc_tokenizer(
             no_output_data, padding=True, add_special_tokens=False, return_offsets_mapping=True, return_tensors='pt')
@@ -115,12 +120,18 @@ class AlignLBModule(LightningModule):
         # get offsets for each split_index
         offsets = enc_tokens['offset_mapping'][:, split_index][:, 0]
         # reconstruct suffix i.e. the labels
+
+        i = 0
         try:
-            suffix = suffix + [no_output_data[i][offsets[i]:]
-                               for i in range(len(no_output_data))]
-        except IndexError:
+            suffix = []
+            while i < len(no_output_data):
+                suffix.append(no_output_data[i][offsets[i]:])
+        except IndexError as e:
             print(len(no_output_data), offsets.shape)
-            raise IndexError
+            raise IndexError from e
+        except Exception as e:
+            print(f"Error at index {i}: no_output_data[{i}] has length {len(no_output_data[i])}, but offset is {offsets[i]}")
+            raise e
 
         lm_tokens = self.lm_tokenizer(
             suffix, max_length=max_length, truncation=True, padding='max_length', return_tensors='pt')
@@ -209,14 +220,14 @@ class LBTrainingArguments:
 
     enc_name_or_path: str = field(default='DKYoon/mt5-small-lm-adapt')
     lm_name_or_path: str = field(default='facebook/opt-125m')
-    alignments: str = field(default='linear')
+    alignments: str = field(default='linear') # TODO: change this to rr
     add_new_lines_to_enc: bool = field(default=True)
 
     enc_hidden_size: int = field(default=512)
     lm_hidden_size: int = field(default=768)
 
     train_set_path: str = field(
-        default='DKYoon/metamath-200k')
+        default='DKYoon/metamath-200k') # TODO: path to the training data
     val_set_path: str = field(
         default=None)
     limit_val_samples: int = field(default=None)
@@ -228,6 +239,10 @@ class LBTrainingArguments:
 
     freeze_language_model: bool = field(default=True)
     freeze_encoder: bool = field(default=True)
+    anchors_path: str = field(default=None)
+    # anchors: list = field(default=None)
+    # anchors: dict = field(default=None)
+    anchor_ids: dict[str, torch.Tensor] = field(default=None)
 
     # redefine some HF arguments
     seed: int = field(default=42)
@@ -249,23 +264,44 @@ class LBTrainingArguments:
     w_decay_lm: float = field(default=0)
 
     warmup_steps: int = field(default=0)
-    per_device_train_batch_size: int = field(default=8)
-    per_device_eval_batch_size: int = field(default=32)
+    per_device_train_batch_size: int = field(default=64)
+    per_device_eval_batch_size: int = field(default=64)
     gradient_accumulation_steps: int = field(default=1)
     gradient_clip_val: float = field(default=1.0)
     bf16: bool = field(default=True)
 
 
+def load_anchor_ids(path: str, enc_tokenizer: AutoTokenizer) -> dict[str, torch.Tensor]:
+    assert os.path.exists(path), f'Anchors path {path} does not exist'
+    assert enc_tokenizer is not None, 'Tokenizer must be provided to load anchors'
+    assert path.endswith('.csv'), 'Anchors must be in csv format'
+
+    anchors = pd.read_csv(path)
+    anchor_ids = {}
+    for col in anchors.columns:
+        anchor_ids[col] = enc_tokenizer(anchors[col].tolist(), padding=True, truncation=True, return_tensors='pt')['input_ids']
+
+    return anchor_ids
+
 if __name__ == '__main__':
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
     parser = HfArgumentParser(LBTrainingArguments)
     training_args: LBTrainingArguments
     training_args = parser.parse_args_into_dataclasses()[0]
+
+    # NOTE: added this to avoid training the encoder embedding layer
+    training_args.n_gpu = 1
+    training_args.add_new_lines_to_enc = False
+    training_args.output_exists = True
+    training_args.alignments = 'rr'
+    training_args.anchors_path = "anchors/sample_anchors.csv" 
 
     if os.path.isdir(training_args.output_dir):
         raise OSError(
             f"Directory '{training_args.output_dir}' already exists.")
 
-    if training_args.alignments not in ['linear', 'ffn'] and training_args.num_latents == -1:
+    if training_args.alignments not in ['linear', 'ffn', 'rr'] and training_args.num_latents == -1: # added 'rr' since it is similar to 'linear'
         raise ValueError(
             'num_latents must be specified when using non-linear alignments')
 
@@ -302,6 +338,10 @@ if __name__ == '__main__':
     if not lm_tokenizer.pad_token:
         lm_tokenizer.pad_token = lm_tokenizer.eos_token
 
+    if training_args.anchors_path and training_args.alignments == 'rr':
+        training_args.anchor_ids = load_anchor_ids(
+            training_args.anchors_path, enc_tokenizer)
+
     logger.info('loading model...')
 
     config = LangBridgeConfig(
@@ -312,6 +352,7 @@ if __name__ == '__main__':
         dim_lm=training_args.lm_hidden_size,
         freeze_language_model=training_args.freeze_language_model,
         freeze_encoder=training_args.freeze_encoder,
+        anchor_ids=training_args.anchor_ids,
     )
 
     model_class = LangBridgeModel
@@ -351,6 +392,7 @@ if __name__ == '__main__':
         project='langbridge',
         name=training_args.run_name)
 
+    # TODO: need to override the checkpoint location to save to Bucket
     trainer = Trainer(
         accelerator='gpu',
         strategy=training_args.strategy,

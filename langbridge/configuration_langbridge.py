@@ -1,3 +1,4 @@
+import torch
 from transformers.configuration_utils import PretrainedConfig
 
 
@@ -12,6 +13,7 @@ class LangBridgeConfig(PretrainedConfig):
         freeze_language_model: bool = True,
         freeze_encoder: bool = True,
         alignments: str = 'linear',
+        anchor_ids: dict[str, torch.Tensor] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -22,3 +24,4 @@ class LangBridgeConfig(PretrainedConfig):
         self.freeze_language_model = freeze_language_model
         self.freeze_encoder = freeze_encoder
         self.alignments = alignments
+        self.anchor_ids = anchor_ids
