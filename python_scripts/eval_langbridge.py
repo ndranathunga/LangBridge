@@ -18,6 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", required=True)
     parser.add_argument("--enc_tokenizer", default='')
+    parser.add_argument("--lm_tokenizer", default='')
     parser.add_argument("--model_args", default="")
     parser.add_argument("--tasks", default=None,
                         choices=utils.MultiChoice(tasks.ALL_TASKS))
@@ -44,6 +45,11 @@ def parse_args():
 
 
 def main():
+    print("CUDA Available:", torch.cuda.is_available())
+    print("CUDA Device Count:", torch.cuda.device_count())
+    if torch.cuda.is_available():
+        print("CUDA Device Name:", torch.cuda.get_device_name(0))
+        
     args = parse_args()
 
     assert not args.provide_description  # not implemented
@@ -81,10 +87,10 @@ def main():
 
     try:
         lm_tokenizer = AutoTokenizer.from_pretrained(
-            args.checkpoint_path, use_fast=False)
+            args.lm_tokenizer, use_fast=False)
     except:
         lm_tokenizer = AutoTokenizer.from_pretrained(
-            args.checkpoint_path, use_fast=True)
+            args.lm_tokenizer, use_fast=True)
 
     if not enc_tokenizer.pad_token:
         enc_tokenizer.pad_token = enc_tokenizer.eos_token

@@ -291,11 +291,11 @@ if __name__ == '__main__':
     training_args = parser.parse_args_into_dataclasses()[0]
 
     # NOTE: added this to avoid training the encoder embedding layer
-    training_args.n_gpu = 1
-    training_args.add_new_lines_to_enc = False
-    training_args.output_exists = True
-    training_args.alignments = 'rr'
-    training_args.anchors_path = "anchors/sample_anchors.csv" 
+    # training_args.n_gpu = 1
+    # training_args.add_new_lines_to_enc = False
+    # training_args.output_exists = True
+    # # training_args.alignments = 'rr'
+    training_args.anchors_path = "../anchors/en_es_sampled.csv" 
 
     if os.path.isdir(training_args.output_dir):
         raise OSError(
@@ -381,7 +381,23 @@ if __name__ == '__main__':
             logger.warning(
                 'Unfreezing encoder embedding layer since new tokens were added')
 
+    model.freeze_encoder()
+    model.freeze_lm()
+
     summary(model)
+
+    # Convert tensors in `anchor_ids` to lists
+    if training_args.alignments == 'rr' and 'anchor_ids' in model.config.__dict__:
+        print("Converting `anchor_ids` tensors to lists for serialization.")
+        for key in model.config.anchor_ids:
+            model.config.anchor_ids[key] = model.config.anchor_ids[key].tolist()
+            # model.config.anchor_ids[key] = None
+
+    # print("Debugging config:")
+    # for key, value in model.config.__dict__.items():
+    #     # print(f"{key}: Type: {type(value)}, Value: {'Non-printable' if not isinstance(value, (int, float, str, list, dict))}")
+    #     if not isinstance(value, (int, float, str, list, dict)):
+    #         print(f"{key}: Type: {type(value)}, Value: {'Non-printable'}")
 
     if not training_args.eval_only:
         model.train()

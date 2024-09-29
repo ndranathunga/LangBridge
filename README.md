@@ -57,6 +57,9 @@ pip install -e bigcode-evaluation-harness
 pip install -e evaluation-harness
 ```
 
+## to fix the version issue in the datasets library for evaluation
+pip install datasets==1.18.3
+
 ## Usage
 ### Quick usage example
 #### Orca2-LangBridge

@@ -1,6 +1,7 @@
 import torch
 from torch import einsum
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange, repeat
 from einops_exts import rearrange_many
 
@@ -18,12 +19,9 @@ class Linear(nn.Module):
         x = self.linear(x)
         return x
 
-class LinearWithRR(nn.Module):
-    """
-    Linear layer with relative representation.
-    """
 
-    def __init__(self, dim, out_dim, anchors: dict[str, torch.Tensor]):
+class LinearWithRR(nn.Module):
+    def __init__(self, dim, out_dim, anchors: dict[str, torch.Tensor], dtype=torch.float32):
         super().__init__()
 
         assert 'high_res' in anchors and 'low_res' in anchors, "Anchors must contain 'high_res' and 'low_res' keys."
@@ -36,22 +34,83 @@ class LinearWithRR(nn.Module):
             f"Expected low_res anchor second dimension to be {dim}, but got {anchors['low_res'].shape[1]}"
         )
 
-        self.anchors_high_res = anchors['high_res']
-        self.anchors_low_res = anchors['low_res']
-        self.linear = nn.Linear(dim, out_dim, bias=True)
+        # Normalize and register buffers for anchors
+        self.register_buffer('anchors_high_res', F.normalize(anchors['high_res'].to(dtype=dtype), p=2, dim=1))
+        self.register_buffer('anchors_low_res', F.normalize(anchors['low_res'].to(dtype=dtype), p=2, dim=1))
 
-    def forward(self, x):
-        # in training mode uses the high resolution anchors, in eval mode uses the low resolution anchors
-        if self.training:
-            anchors = self.anchors_high_res
-        else:
-            anchors = self.anchors_low_res
+        # Define a linear layer with input size equal to the number of anchors and output size as specified
+        self.linear = nn.Linear(self.anchors_high_res.size(0), out_dim, bias=True)
 
-        x = x @ anchors.t()
-        x = self.linear(x)
+    def forward(self, x, *args, **kwargs):
+        # Normalize the input for cosine similarity calculation
+        x = F.normalize(x, p=2, dim=1)
+        
+        # Use high-res anchors in training mode, low-res in eval mode
+        anchors = self.anchors_high_res if self.training else self.anchors_low_res
 
+        # Move anchors to the same device as x
+        anchors = anchors.to(x.device)
+
+        # Convert anchors to the same dtype as x
+        anchors = anchors.to(dtype=x.dtype)
+        
+        # Calculate cosine similarity between x and each anchor
+        cosine_similarities = torch.matmul(x, anchors.t())  # Shape: [batch_size, num_anchors]
+
+        # Pass the cosine similarities through the linear layer
+        output = self.linear(cosine_similarities)
+
+        return output
+
+class LinearWithAddedEosRR(nn.Module):
+    """
+    Linear layer with optional bias and activation function.
+    """
+
+    def __init__(self, dim, out_dim, anchors: dict[str, torch.Tensor], dtype=torch.float32):
+        super().__init__()
+
+        assert 'high_res' in anchors and 'low_res' in anchors, "Anchors must contain 'high_res' and 'low_res' keys."
+        assert anchors['high_res'].ndimension() == 2, "high_res anchor must be a 2D tensor."
+        assert anchors['low_res'].ndimension() == 2, "low_res anchor must be a 2D tensor."
+        assert anchors['high_res'].shape[1] == dim, (
+            f"Expected high_res anchor second dimension to be {dim}, but got {anchors['high_res'].shape[1]}"
+        )
+        assert anchors['low_res'].shape[1] == dim, (
+            f"Expected low_res anchor second dimension to be {dim}, but got {anchors['low_res'].shape[1]}"
+        )
+
+        # Normalize and register buffers for anchors
+        self.register_buffer('anchors_high_res', F.normalize(anchors['high_res'].to(dtype=dtype), p=2, dim=1))
+        self.register_buffer('anchors_low_res', F.normalize(anchors['low_res'].to(dtype=dtype), p=2, dim=1))
+
+        # Define a linear layer with input size equal to the number of anchors and output size as specified
+        self.linear = nn.Linear(self.anchors_high_res.size(0), out_dim, bias=True)
+
+        self.enc_eos = nn.Parameter(torch.randn(out_dim))
+
+    def forward(self, x, *args):
+        # Normalize the input for cosine similarity calculation
+        x = F.normalize(x, p=2, dim=1)
+        
+        # Use high-res anchors in training mode, low-res in eval mode
+        anchors = self.anchors_high_res if self.training else self.anchors_low_res
+
+        # Move anchors to the same device as x
+        anchors = anchors.to(x.device)
+
+        # Convert anchors to the same dtype as x
+        anchors = anchors.to(dtype=x.dtype)
+        
+        # Calculate cosine similarity between x and each anchor
+        cosine_similarities = torch.matmul(x, anchors.t())  # Shape: [batch_size, num_anchors]
+
+        x = self.linear(cosine_similarities)
+        eos = repeat(self.enc_eos, 'd -> b d', b=x.shape[0])
+        eos = rearrange(eos, 'b d -> b 1 d')
+        x = torch.cat((x, eos), dim=1)
+        
         return x
-
 
 class LinearWithAddedEos(nn.Module):
     """

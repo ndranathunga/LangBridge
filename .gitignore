@@ -6,6 +6,7 @@ training/checkpoints
 training/lightning_logs
 training/training_data
 training/embedings
+checkpoints/
 
 s.vscode/
 **/wandb/
