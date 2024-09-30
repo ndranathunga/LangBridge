@@ -13,16 +13,16 @@ NUM_GPU=1
 ARGS="
 --n_gpu $NUM_GPU
 --strategy deepspeed_stage_2
---output_dir checkpoints/Llama-3.2-1B-Instruct-rr
---run_name Llama-3.2-1B-Instruct-test-rr
+--output_dir checkpoints/MetaMath-7B-V1.0-rr-4096
+--run_name MetaMath-7B-V1.0-test-rr-4096
 --seed 42
 --train_set_path DKYoon/metamath-200k
 --output_exists True
---enc_name_or_path DKYoon/mt5-small-lm-adapt
---lm_name_or_path meta-llama/Llama-3.2-1B-Instruct
---alignments rr
---enc_hidden_size 512
---lm_hidden_size 1536
+--enc_name_or_path DKYoon/mt5-xl-lm-adapt
+--lm_name_or_path meta-math/MetaMath-7B-V1.0
+--alignments linear
+--enc_hidden_size 2048
+--lm_hidden_size 4096
 --max_length 128
 --max_length_enc 1024
 --freeze_language_model True
@@ -32,7 +32,7 @@ ARGS="
 --w_decay_alignment 0.0
 --w_decay_enc 0.1
 --warmup_steps 0
---per_device_train_batch_size 28
+--per_device_train_batch_size 16
 --per_device_eval_batch_size 16
 --gradient_accumulation_steps 8
 --logging_steps 10

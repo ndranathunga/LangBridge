@@ -489,6 +489,7 @@ class LBSeq2SeqLM(HuggingFaceLB):
             self.lm_tokenizer, stop, 1, input_ids.shape[0]
         )
 
+        # NOTE: EOS issue fixed here for evaluation code
         generations = self.model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -497,6 +498,9 @@ class LBSeq2SeqLM(HuggingFaceLB):
             max_new_tokens=max_tokens,
             stopping_criteria=stopping_criteria,
             do_sample=False,
+            eos_token_id=self.lm_tokenizer.eos_token_id,
+            pad_token_id=self.lm_tokenizer.eos_token_id,
+            bos_token_id=self.lm_tokenizer.bos_token_id,
         )
         return generations
 

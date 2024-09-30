@@ -615,6 +615,9 @@ class LangBridgeModel(PreTrainedModel):
         input_ids = input_ids.repeat(enc_ids.shape[0], 1).to(self.device)
         attention_mask = torch.ones_like(input_ids)
 
+        # print(lm_tokenizer.eos_token_id)
+
+        # EOS issue fixed here for normal usage
         out_ids = self.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -623,7 +626,8 @@ class LangBridgeModel(PreTrainedModel):
             early_stopping=True,
             use_cache=True,
             bos_token_id=lm_tokenizer.bos_token_id,
-            eos_token_id=32002,  # <|im_end|>
+            # eos_token_id=32002,  # <|im_end|>
+            eos_token_id=lm_tokenizer.eos_token_id,
             pad_token_id=lm_tokenizer.eos_token_id,
             **kwargs
         )
